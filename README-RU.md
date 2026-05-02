@@ -194,7 +194,3 @@ cd /opt/xray-logs-collector
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE).
-
-## Связанные проекты
-
-- [remnawave-backup-restore](https://github.com/Nurullaev/remnawave-backup-restore) — полный бэкап/восстановление панели Remnawave + бота

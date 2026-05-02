@@ -195,7 +195,3 @@ Optional:
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Related projects
-
-- [remnawave-backup-restore](https://github.com/Nurullaev/remnawave-backup-restore) — full backup/restore of Remnawave panel + bot

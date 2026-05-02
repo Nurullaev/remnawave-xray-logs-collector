@@ -1,0 +1,13 @@
+# Sensitive — actual config with credentials
+config.env
+
+# Logs
+*.log
+collector.log
+
+# Temp
+*.bak
+*.bak.*
+.DS_Store
+*~
+*.swp

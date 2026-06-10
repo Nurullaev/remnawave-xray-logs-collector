@@ -106,7 +106,7 @@ grep -qF "xray-logs-collector" /root/.ssh/authorized_keys || \
 cat > /etc/logrotate.d/remnanode <<'EOF'
 /var/log/remnanode/*.log {
     su root root
-    size 50M
+    daily
     rotate 30
     compress
     delaycompress
@@ -178,7 +178,7 @@ Optional:
 - **Why `dateext`?** Without it, rotated files are named `access.log.1.gz`, `.2.gz`, ... and cascade on each rotation (`.1` → `.2` → `.3` → ...). Same name = different content tomorrow, breaking idempotency. With `dateext` each rotated file has a unique date-time suffix that never repeats.
 - **Why `rotate 30`?** Buffer of 30 days. Even if the collector misses several days in a row, no data is lost.
 - **Why skip uncompressed files?** With `delaycompress`, the most recently rotated file is uncompressed (`.log` without `.gz`) for one cycle before being compressed. The collector intentionally skips these — they'll become `.gz` on the next logrotate run and be picked up then.
-- **Logrotate runs once per day** by default (`logrotate.timer` with `OnCalendar=daily`). With `size 50M` the file rotates only if it exceeds 50 MB at the moment of the daily run, so on busy nodes the rotated file may be much larger than 50 MB.
+- **Logrotate runs once per day** by default (`logrotate.timer` with `OnCalendar=daily`). With the `daily` directive (plus `notifempty`), each non-empty log is rotated every day regardless of size — this gives one rotated file per node per day, so every node contributes to S3 every day and the Telegram report reads cleanly. Truly dead nodes (where xray stopped writing entirely, file is 0 bytes) still surface as "nothing to collect" because of `notifempty`, preserving the broken-detection signal.
 
 ## Troubleshooting
 

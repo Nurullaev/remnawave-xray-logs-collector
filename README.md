@@ -153,7 +153,8 @@ Optional:
 |---|---|---|
 | `S3_PREFIX` | `xray-logs/` | Key prefix inside the bucket |
 | `SSH_USER` | `root` | Default SSH user |
-| `SSH_USER_OVERRIDES` | empty | Per-IP override, e.g. `"1.2.3.4:ubuntu 5.6.7.8:admin"` |
+| `SSH_USER_OVERRIDES` | empty | Per-IP user override, e.g. `"1.2.3.4:ubuntu 5.6.7.8:admin"` |
+| `SSH_HOST_OVERRIDES` | empty | Per-IP *transport* override, e.g. `"1.2.3.4:10.0.0.4"` — SSH to a different address than the one in the panel. See [Multi-homed nodes](#multi-homed-nodes). |
 | `SSH_PORT` | `22` | |
 | `PARALLEL_JOBS` | `4` | Number of nodes processed concurrently |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` / `TELEGRAM_TOPIC_ID` | empty | Leave empty to disable Telegram |
@@ -179,6 +180,31 @@ Optional:
 - **Why `rotate 30`?** Buffer of 30 days. Even if the collector misses several days in a row, no data is lost.
 - **Why skip uncompressed files?** With `delaycompress`, the most recently rotated file is uncompressed (`.log` without `.gz`) for one cycle before being compressed. The collector intentionally skips these — they'll become `.gz` on the next logrotate run and be picked up then.
 - **Logrotate runs once per day** by default (`logrotate.timer` with `OnCalendar=daily`). With the `daily` directive (plus `notifempty`), each non-empty log is rotated every day regardless of size — this gives one rotated file per node per day, so every node contributes to S3 every day and the Telegram report reads cleanly. Truly dead nodes (where xray stopped writing entirely, file is 0 bytes) still surface as "nothing to collect" because of `notifempty`, preserving the broken-detection signal.
+
+## Multi-homed nodes
+
+The S3 prefix is keyed by the node's IP **as reported by the panel API**. Two consequences worth knowing:
+
+**A node's IP changed in the panel.** The collector sees a brand-new node and re-uploads its entire on-disk history (up to `rotate 30` days) under the new prefix — you get a 🟡 report line with a large file count and multi-GB size. To consolidate, copy the old prefix onto the new one server-side, verify, then drop the old:
+
+```bash
+# with S3 creds exported from config.env
+aws --endpoint-url "$S3_ENDPOINT_URL" s3 sync \
+    "s3://$S3_BUCKET/${S3_PREFIX}<OLD_IP>/" "s3://$S3_BUCKET/${S3_PREFIX}<NEW_IP>/" --no-progress
+# verify object counts and sizes match, THEN:
+aws --endpoint-url "$S3_ENDPOINT_URL" s3 rm "s3://$S3_BUCKET/${S3_PREFIX}<OLD_IP>/" --recursive
+```
+
+Always `sync` → verify → `rm`. Never `mv` in one shot.
+
+**The panel IP is unreachable or lossy from the collector.** If the server has another address that is reachable, point the transport at it with `SSH_HOST_OVERRIDES` while keeping the panel IP as the S3 key:
+
+```bash
+SSH_HOST_OVERRIDES="203.0.113.10:198.51.100.10"
+#                   ^ IP in panel   ^ IP to SSH to
+```
+
+Only the SSH/rsync connection is redirected — the S3 prefix still uses the panel IP, so the node's archive stays in one place. `./xray-logs-collector.sh test <panel-ip>` prints the override when one is in effect. Treat this as a workaround: a lossy path is usually an upstream routing problem worth reporting to the host.
 
 ## Troubleshooting
 

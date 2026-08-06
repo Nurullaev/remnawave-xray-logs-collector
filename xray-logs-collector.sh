@@ -77,6 +77,7 @@ load_config() {
     SSH_PORT="${SSH_PORT:-22}"
     SSH_TIMEOUT="${SSH_TIMEOUT:-15}"
     SSH_USER_OVERRIDES="${SSH_USER_OVERRIDES:-}"
+    SSH_HOST_OVERRIDES="${SSH_HOST_OVERRIDES:-}"
     REMOTE_LOG_DIR="${REMOTE_LOG_DIR:-/var/log/remnanode}"
     S3_REGION="${S3_REGION:-ru-1}"
     S3_PREFIX="${S3_PREFIX:-xray-logs/}"
@@ -142,15 +143,29 @@ s3_upload() {
 
 # ---------- SSH helpers ----------
 
-ssh_user_for() {
-    local ip="$1" pair k v
-    for pair in $SSH_USER_OVERRIDES; do
+# Look up "<node-ip>:<value>" pairs in a whitespace-separated override list.
+# Prints the matching value, or the given default when there is no match.
+_override_for() {
+    local ip="$1" default="$2" list="$3" pair k v
+    for pair in $list; do
         k="${pair%%:*}"; v="${pair#*:}"
         if [[ "$k" == "$ip" ]]; then
             echo "$v"; return
         fi
     done
-    echo "$SSH_USER"
+    echo "$default"
+}
+
+ssh_user_for() {
+    _override_for "$1" "$SSH_USER" "$SSH_USER_OVERRIDES"
+}
+
+# Address to actually SSH to. Defaults to the node IP from the panel, but can be
+# redirected when that IP is unreliable from the collector (multi-homed node,
+# upstream routing issue). The panel IP still keys the S3 prefix, so overriding
+# the transport does not split a node's archive.
+ssh_host_for() {
+    _override_for "$1" "$1" "$SSH_HOST_OVERRIDES"
 }
 
 _ssh_opts() {
@@ -159,17 +174,21 @@ _ssh_opts() {
 
 ssh_run() {
     local ip="$1"; shift
-    local user; user="$(ssh_user_for "$ip")"
+    local user host
+    user="$(ssh_user_for "$ip")"
+    host="$(ssh_host_for "$ip")"
     # -n redirects stdin from /dev/null so ssh doesn't consume the parent shell's stdin
     # shellcheck disable=SC2046
-    ssh -n $(_ssh_opts) "${user}@${ip}" "$@"
+    ssh -n $(_ssh_opts) "${user}@${host}" "$@"
 }
 
 ssh_pull() {
     local ip="$1" remote="$2" local_path="$3"
-    local user; user="$(ssh_user_for "$ip")"
+    local user host
+    user="$(ssh_user_for "$ip")"
+    host="$(ssh_host_for "$ip")"
     rsync -a --partial --inplace -e "ssh $(_ssh_opts)" \
-        "${user}@${ip}:${remote}" "$local_path"
+        "${user}@${host}:${remote}" "$local_path"
 }
 
 # ---------- Remnawave API ----------
@@ -442,8 +461,13 @@ cmd_test() {
     fi
     log STEP "Testing node $ip"
 
+    local host; host="$(ssh_host_for "$ip")"
+    if [[ "$host" != "$ip" ]]; then
+        log INFO "SSH host override in effect: connecting to $host (S3 prefix stays $ip)"
+    fi
+
     if ! ssh_run "$ip" "echo OK" >/dev/null 2>&1; then
-        log ERROR "SSH connection failed (key=$SSH_KEY_PATH user=$(ssh_user_for "$ip"))"
+        log ERROR "SSH connection failed (key=$SSH_KEY_PATH user=$(ssh_user_for "$ip") host=$host)"
         exit 1
     fi
     log SUCCESS "SSH OK"
@@ -493,6 +517,7 @@ cmd_status() {
     if [[ -f "$CONFIG_FILE" ]]; then
         echo "  PANEL_URL:        ${PANEL_URL:-<not set>}"
         echo "  SSH_KEY_PATH:     ${SSH_KEY_PATH:-<not set>}"
+        echo "  SSH_HOST_OVERRIDES: ${SSH_HOST_OVERRIDES:-<none>}"
         echo "  S3_ENDPOINT_URL:  ${S3_ENDPOINT_URL:-<not set>}"
         echo "  S3_BUCKET:        ${S3_BUCKET:-<not set>}"
         echo "  S3_PREFIX:        ${S3_PREFIX:-<not set>}"

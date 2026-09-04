@@ -317,6 +317,20 @@ collect_node() {
         rm -f "$local_tmp"
     done <<< "$listing"
 
+    # --- purge remote archives already uploaded to S3 ---
+    # Runs ONLY when the node was processed cleanly (errors==0): every .gz was
+    # either uploaded just now or already present in S3 (skipped).
+    # Only compressed archives are removed; the live access.log and uncompressed
+    # dateext files are never touched.
+    if (( errors == 0 )) && [[ "${REMOTE_RETENTION_DAYS:-0}" =~ ^[0-9]+$ ]] \
+       && (( ${REMOTE_RETENTION_DAYS:-0} > 0 )); then
+        local purged
+        purged=$(ssh_run "$ip" "find $REMOTE_LOG_DIR -maxdepth 1 -type f \\( -name '*.log.*.gz' -o -name '*.log-*.gz' \\) -mtime +${REMOTE_RETENTION_DAYS} -printf . -delete 2>/dev/null | wc -c" 2>/dev/null | tr -d '[:space:]')
+        if [[ "${purged:-0}" =~ ^[0-9]+$ ]] && (( purged > 0 )); then
+            log INFO "[$name] $ip — purged $purged archive(s) older than ${REMOTE_RETENTION_DAYS}d"
+        fi
+    fi
+
     local status="OK"
     if (( errors > 0 )); then
         status="PARTIAL"

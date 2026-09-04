@@ -157,10 +157,33 @@ Optional:
 | `SSH_HOST_OVERRIDES` | empty | Per-IP *transport* override, e.g. `"1.2.3.4:10.0.0.4"` — SSH to a different address than the one in the panel. See [Multi-homed nodes](#multi-homed-nodes). |
 | `SSH_PORT` | `22` | |
 | `PARALLEL_JOBS` | `4` | Number of nodes processed concurrently |
+| `REMOTE_RETENTION_DAYS` | `0` | Delete compressed archives older than N days **from the node** after a clean upload. `0` keeps everything. See [Retention](#retention). |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` / `TELEGRAM_TOPIC_ID` | empty | Leave empty to disable Telegram |
 | `LOG_FILE` | `/var/log/rw-xray-logs.log` | |
 | `LOCK_FILE` | `/var/run/xray-logs-collector.lock` | |
 | `TMP_DIR` | `/var/tmp/xray-logs-collector` | |
+
+## Retention
+
+The collector uploads archives to S3 but, by default, **never deletes anything from the node** —
+rotated `.gz` files accumulate there indefinitely. Set `REMOTE_RETENTION_DAYS` to have them cleaned
+up automatically:
+
+```bash
+REMOTE_RETENTION_DAYS=2
+```
+
+Deletion happens per node, right after its files are handled, and is deliberately conservative:
+
+- it runs **only when that node finished with zero errors**, meaning every archive was either
+  uploaded in this run or already present in S3 (counted as `skipped`). One failed upload and
+  nothing is removed on that node;
+- it removes **compressed archives only** (`*.log.*.gz`, `*.log-*.gz`). The live `access.log` and
+  uncompressed `dateext` files are never touched — the collector skips those on purpose
+  (`delaycompress`), they are uploaded once the next rotation compresses them;
+- with `REMOTE_RETENTION_DAYS=0` (the default) the behaviour is unchanged and nothing is deleted.
+
+Each cleanup is logged as `purged N archive(s) older than Nd`.
 
 ## Commands
 

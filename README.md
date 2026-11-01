@@ -11,6 +11,7 @@ Auto-discovers nodes from the panel API, pulls rotated `.gz` files via SSH+rsync
 - 🔄 **Auto-discovery** of nodes via Remnawave panel API (`GET /api/nodes`) — no static inventory to maintain
 - 📦 **Idempotent uploads** — checks S3 before each transfer, skips files already present
 - ⚡ **Parallel collection** — configurable worker pool
+- 🔁 **Transfer retries** — up to three SSH/rsync attempts per archive, with a three-second pause; failures include the exit code and rsync output in the log
 - 🧱 **Lock file** — overlapping cron runs are blocked via `flock`
 - 📨 **Telegram report** — per-node status with file counts and sizes
 - 🗂 **Stable S3 layout** — `s3://<bucket>/<prefix><node-ip>/<YYYY>/<MM>/<filename>` (IP-based, survives node renames in panel)

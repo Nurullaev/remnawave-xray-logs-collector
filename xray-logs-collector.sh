@@ -56,7 +56,10 @@ log_to_file() {
 
 log() {
     # Write to stderr so callers can capture stdout for structured results
-    print_message "$1" "$2" >&2
+    # Cron may redirect stderr to LOG_FILE itself; avoid writing each entry twice.
+    if [[ -z "${LOG_FILE:-}" || ! "${LOG_FILE}" -ef /dev/fd/2 ]]; then
+        print_message "$1" "$2" >&2
+    fi
     log_to_file "$1" "$2"
 }
 
@@ -187,8 +190,24 @@ ssh_pull() {
     local user host
     user="$(ssh_user_for "$ip")"
     host="$(ssh_host_for "$ip")"
-    rsync -a --partial --inplace -e "ssh $(_ssh_opts)" \
-        "${user}@${host}:${remote}" "$local_path"
+    local attempt rc=0 output line
+    for attempt in 1 2 3; do
+        if output=$(rsync -a --partial --inplace -e "ssh $(_ssh_opts)" \
+            "${user}@${host}:${remote}" "$local_path" 2>&1); then
+            if (( attempt > 1 )); then
+                log INFO "[$ip] rsync recovered on attempt $attempt/3: $remote"
+            fi
+            return 0
+        else
+            rc=$?
+        fi
+        log WARN "[$ip] rsync attempt $attempt/3 failed (exit=$rc): $remote"
+        while IFS= read -r line; do
+            [[ -z "$line" ]] || log WARN "[$ip] rsync: $line"
+        done <<< "$output"
+        (( attempt == 3 )) || sleep 3
+    done
+    return "$rc"
 }
 
 # ---------- Remnawave API ----------
@@ -345,9 +364,11 @@ collect_node() {
 
 cmd_collect() {
     # Lock to prevent overlapping cron runs
-    exec 200>"$LOCK_FILE" 2>/dev/null || {
-        log WARN "Cannot create lock file at $LOCK_FILE — running without lock"
-    }
+    # Scope stderr suppression to opening the lock, not the entire collection.
+    if ! { exec 200>"$LOCK_FILE"; } 2>/dev/null; then
+        log ERROR "Cannot create lock file at $LOCK_FILE"
+        exit 1
+    fi
     if ! flock -n 200; then
         log ERROR "Another collector run is in progress (lock held)"
         exit 1
